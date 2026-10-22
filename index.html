@@ -1641,7 +1641,7 @@ function viewWorkout(p){
     <section class="panel rise"><div class="row"><button class="primary" data-act="wFinish" data-date="${selDate}">${log&&log.done?"Edit time &amp; calories":"Finish workout"}</button><button data-act="actAdd" data-date="${selDate}">+ Log other activity</button><button class="wa-out" data-act="wCopy" data-date="${selDate}">${ICO_CHAT} Copy for trainer</button><span class="spacer"></span><span class="small muted">Cool down: 3–5 minutes of easy walking and stretching.</span></div></section>`;
   }
   const bt=burnedOn(p,selDate); const acts=(log&&log.acts)||[];
-  const burnBar=`<section class="burnbar rise"><div><span class="label">Burned on ${esc(fmtShort(selDate))}</span><b class="num">${fmtN(bt.kcal)} kcal</b><span class="small muted">${bt.mins} min active</span></div>${acts.length?`<div class="row small">${acts.map(a=>`<span class="eqchip">${esc(ACTS[a.type]?.[0]||"Activity")} · ${a.mins} min · ${fmtN(a.kcal)} kcal <button class="ghost" data-act="actDel" data-date="${selDate}" data-id="${a.id}" aria-label="Remove">✕</button></span>`).join("")}</div>`:""}<button data-act="actAdd" data-date="${selDate}">+ Walk, run or sport</button></section>`;
+  const burnBar=`<section class="burnbar rise"><div><span class="label">Burned on ${esc(fmtShort(selDate))}</span><b class="num">${fmtN(bt.kcal)} kcal</b><span class="small muted">${bt.mins} min active</span></div>${acts.length?`<div class="row small">${acts.map(a=>`<span class="eqchip">${esc(ACTS[a.type]?.[0]||"Activity")} · ${a.mins} min · ${fmtN(a.kcal)} kcal <button class="ghost" data-act="actEdit" data-date="${selDate}" data-id="${a.id}" aria-label="Edit">✎</button><button class="ghost" data-act="actDel" data-date="${selDate}" data-id="${a.id}" aria-label="Delete">✕</button></span>`).join("")}</div>`:""}<button data-act="actAdd" data-date="${selDate}">+ Walk, run or sport</button></section>`;
   return header+strip+locBar+burnBar+body;
 }
 function trainerPanelW(p,tp){
@@ -1793,22 +1793,25 @@ function finishSheet(p,date){
       <label class="field"><span>How hard was it?</span><select id="fin_int">${Object.entries(INTENS).map(([k,[l]])=>`<option value="${k}" ${k===inten?"selected":""}>${l}</option>`).join("")}</select></label>
     </div>
     <div class="burnbox"><span class="label">Calories burned</span><b class="num" id="fin_kcal">${fmtN(burnFor(p,met,mins,inten))}</b><span class="small muted">kcal · estimated from the exercises, your weight (${r1(currentWeight(p))} kg) and time</span></div>
-    <div class="row"><button class="primary" type="submit">${lg.done?"Save changes":"Save workout"}</button>${lg.done?`<button type="button" class="ghost danger" data-act="wUndo" data-date="${date}">Mark as not done</button>`:""}</div>
+    <div class="row"><button class="primary" type="submit">${lg.done?"Save changes":"Save workout"}</button>${lg.done?`<button type="button" class="ghost danger" data-act="wUndo" data-date="${date}">Delete this workout</button>`:""}</div>
   </form>`);
   const upd=()=>{$("#fin_kcal").textContent=fmtN(burnFor(p,met,+$("#fin_mins").value||0,$("#fin_int").value))};
   $("#fin_mins").addEventListener("input",upd); $("#fin_int").addEventListener("change",upd);
 }
-function actSheet(p,date){
-  showOverlay(`<form class="sheet" id="actForm" data-date="${date}" novalidate>
-    <div class="row"><h2>Log other activity</h2><span class="spacer"></span><button type="button" class="ghost" data-act="close">Close</button></div>
+function actSheet(p,date,id){
+  const ed=id?((wlogOf(p,date)||{}).acts||[]).find(x=>x.id===id):null;
+  const v=ed||{type:"walk",mins:30,time:timeFor(date,defaultMeal()),intensity:"moderate"};
+  showOverlay(`<form class="sheet" id="actForm" data-date="${date}" data-id="${ed?ed.id:""}" novalidate>
+    <div class="row"><h2>${ed?"Edit activity":"Log other activity"}</h2><span class="spacer"></span><button type="button" class="ghost" data-act="close">Close</button></div>
     <div class="grid g2">
-      <label class="field"><span>Activity</span><select id="act_t">${Object.entries(ACTS).map(([k,[l]])=>`<option value="${k}">${l}</option>`).join("")}</select></label>
-      <label class="field"><span>Minutes</span><input id="act_m" class="num" type="number" inputmode="numeric" min="1" max="600" value="30"></label>
-      <label class="field"><span>Time</span><input id="act_time" type="time" value="${timeFor(date,defaultMeal())}"></label>
-      <label class="field"><span>Effort</span><select id="act_i">${Object.entries(INTENS).map(([k,[l]])=>`<option value="${k}" ${k==="moderate"?"selected":""}>${l}</option>`).join("")}</select></label>
+      <label class="field"><span>Activity</span><select id="act_t">${Object.entries(ACTS).map(([k,[l]])=>`<option value="${k}" ${k===v.type?"selected":""}>${l}</option>`).join("")}</select></label>
+      <label class="field"><span>Minutes</span><input id="act_m" class="num" type="number" inputmode="numeric" min="1" max="600" value="${esc(v.mins)}"></label>
+      <label class="field"><span>Date</span><input id="act_date" type="date" value="${date}" max="${today()}"></label>
+      <label class="field"><span>Time</span><input id="act_time" type="time" value="${esc(v.time||"")}"></label>
+      <label class="field"><span>Effort</span><select id="act_i">${Object.entries(INTENS).map(([k,[l]])=>`<option value="${k}" ${k===v.intensity?"selected":""}>${l}</option>`).join("")}</select></label>
     </div>
     <div class="burnbox"><span class="label">Calories burned</span><b class="num" id="act_kcal">0</b><span class="small muted">kcal · estimate</span></div>
-    <div class="row"><button class="primary" type="submit">Add activity</button></div>
+    <div class="row"><button class="primary" type="submit">${ed?"Save changes":"Add activity"}</button>${ed?`<button type="button" class="ghost danger" data-act="actDel" data-date="${date}" data-id="${ed.id}">Delete activity</button>`:""}</div>
   </form>`);
   const upd=()=>{$("#act_kcal").textContent=fmtN(burnFor(p,ACTS[$("#act_t").value][1],+$("#act_m").value||0,$("#act_i").value))};
   ["act_t","act_m","act_i"].forEach(id=>$("#"+id).addEventListener("input",upd)); $("#act_t").addEventListener("change",upd); upd();
@@ -1855,7 +1858,7 @@ function activitySection(p){
   if(!hasWorkout()) return `<section class="panel"><div class="row"><h2>Workouts &amp; calories burned</h2><span class="spacer"></span><span class="chip">Members only</span></div><p class="small muted" style="margin:0">Workout tracking is an exclusive feature. Enter an access code from the admin on the Workout tab to see minutes and calories burned here.</p><div class="row"><button data-act="tab" data-tab="workout">Enter access code</button></div></section>`;
   const days=[]; for(let i=13;i>=0;i--){const d=addDays(today(),-i);const b=burnedOn(p,d);days.push({date:d,...b})}
   const wk=weekDates(today()).map(([,d])=>burnedOn(p,d)); const wkK=sum(wk,"kcal"),wkM=sum(wk,"mins"),wkS=sum(wk,"sessions");
-  const rows=[]; Object.keys((S.wlog&&S.wlog[p.id])||{}).sort().reverse().slice(0,30).forEach(d=>{const lg=S.wlog[p.id][d];if(lg.done)rows.push({d,name:lg.plan||"Workout",mins:lg.mins,kcal:lg.kcal,inten:lg.intensity});(lg.acts||[]).forEach(a=>rows.push({d,name:ACTS[a.type]?.[0]||"Activity",mins:a.mins,kcal:a.kcal,inten:a.intensity,time:a.time}))});
+  const rows=[]; Object.keys((S.wlog&&S.wlog[p.id])||{}).sort().reverse().slice(0,30).forEach(d=>{const lg=S.wlog[p.id][d];if(lg.done)rows.push({d,name:lg.plan||"Workout",mins:lg.mins,kcal:lg.kcal,inten:lg.intensity,main:true});(lg.acts||[]).forEach(a=>rows.push({d,id:a.id,name:ACTS[a.type]?.[0]||"Activity",mins:a.mins,kcal:a.kcal,inten:a.intensity,time:a.time}))});
   return `<section class="panel">
     <div class="row"><h2>Workouts &amp; calories burned</h2><span class="spacer"></span><button data-act="actAdd" data-date="${today()}">+ Log other activity</button></div>
     <div class="grid g4 mini">
@@ -1865,7 +1868,7 @@ function activitySection(p){
       <div class="tile"><span class="label">Last 14 days</span><span class="big num">${fmtN(sum(days,"kcal"))}</span><span class="small muted">kcal · ${sum(days,"mins")} min</span></div>
     </div>
     ${burnChart(days)}
-    ${rows.length?`<div class="scroll"><table><thead><tr><th>Date</th><th>Activity</th><th class="r">Minutes</th><th class="r">Burned</th><th>Effort</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(fmtDay(r.d))}</td><td>${esc(r.name)}</td><td class="r num">${r.mins||"—"}</td><td class="r num">${r.kcal?fmtN(r.kcal)+" kcal":"—"}</td><td>${esc(INTENS[r.inten]?.[0]||"")}</td></tr>`).join("")}</tbody></table></div>`:`<div class="note">No workouts logged yet. Finish a workout on the Workout tab, or log a walk or sport here.</div>`}
+    ${rows.length?`<div class="scroll"><table><thead><tr><th>Date</th><th>Activity</th><th class="r">Minutes</th><th class="r">Burned</th><th>Effort</th><th class="r"></th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(fmtDay(r.d))}</td><td>${esc(r.name)}</td><td class="r num">${r.mins||"—"}</td><td class="r num">${r.kcal?fmtN(r.kcal)+" kcal":"—"}</td><td>${esc(INTENS[r.inten]?.[0]||"")}</td><td class="r">${r.main?`<button class="ghost" data-act="wFinish" data-date="${r.d}">Edit</button><button class="ghost danger" data-act="wDelAsk" data-date="${r.d}">Delete</button>`:`<button class="ghost" data-act="actEdit" data-date="${r.d}" data-id="${r.id}">Edit</button><button class="ghost danger" data-act="actDelAsk" data-date="${r.d}" data-id="${r.id}">Delete</button>`}</td></tr>`).join("")}</tbody></table></div>`:`<div class="note">No workouts logged yet. Finish a workout on the Workout tab, or log a walk or sport here.</div>`}
   </section>`;
 }
 
@@ -2898,9 +2901,12 @@ document.addEventListener("click",async ev=>{
     const all=day&&day.items.every((it,k)=>(lg.sets[k]||0)>=(+it.sets||3));wlogSet(p,date,lg);render();if(all&&!lg.done){toast("All sets done! Log your time to save calories burned.");setTimeout(()=>finishSheet(p,date),350)}}
   else if(a==="wFinish"){finishSheet(p,el.dataset.date)}
   else if(a==="wStart"){const date=el.dataset.date;const lg=Object.assign({sets:{}},wlogOf(p,date)||{});lg.start=Date.now();wlogSet(p,date,lg);render();toast("Timer started. Tap Finish workout when you're done.")}
-  else if(a==="wUndo"){const date=el.dataset.date;const lg=Object.assign({},wlogOf(p,date)||{});lg.done=false;delete lg.mins;delete lg.kcal;delete lg.start;wlogSet(p,date,lg);closeOverlay();render()}
+  else if(a==="wUndo"){const date=el.dataset.date;const lg=Object.assign({},wlogOf(p,date)||{});lg.done=false;delete lg.mins;delete lg.kcal;delete lg.start;delete lg.intensity;wlogSet(p,date,(lg.acts||[]).length||Object.keys(lg.sets||{}).length?lg:null);closeOverlay();render();toast("Workout deleted")}
+  else if(a==="actEdit"){actSheet(p,el.dataset.date,el.dataset.id)}
+  else if(a==="wDelAsk"){const d=el.dataset.date;const lg=wlogOf(p,d)||{};showOverlay(`<div class="sheet"><h2>Delete this workout?</h2><p>${esc(lg.plan||"Workout")} on ${esc(fmtDay(d))}: ${lg.mins||0} min, ${fmtN(lg.kcal||0)} kcal. It will be removed from your calories burned and progress.</p><div class="row"><button class="primary" data-act="wUndo" data-date="${d}" style="background:var(--bad);border-color:var(--bad)">Delete workout</button><button data-act="close">Keep it</button></div></div>`)}
+  else if(a==="actDelAsk"){const d=el.dataset.date;const x=((wlogOf(p,d)||{}).acts||[]).find(y=>y.id===el.dataset.id);if(!x)return;showOverlay(`<div class="sheet"><h2>Delete this activity?</h2><p>${esc(ACTS[x.type]?.[0]||"Activity")} on ${esc(fmtDay(d))}: ${x.mins} min, ${fmtN(x.kcal)} kcal.</p><div class="row"><button class="primary" data-act="actDel" data-date="${d}" data-id="${x.id}" style="background:var(--bad);border-color:var(--bad)">Delete activity</button><button data-act="close">Keep it</button></div></div>`)}
   else if(a==="actAdd"){actSheet(p,el.dataset.date)}
-  else if(a==="actDel"){const date=el.dataset.date;const lg=Object.assign({},wlogOf(p,date)||{});lg.acts=(lg.acts||[]).filter(x=>x.id!==el.dataset.id);wlogSet(p,date,lg);render()}
+  else if(a==="actDel"){const date=el.dataset.date;const lg=Object.assign({},wlogOf(p,date)||{});lg.acts=(lg.acts||[]).filter(x=>x.id!==el.dataset.id);wlogSet(p,date,lg.done||lg.acts.length||Object.keys(lg.sets||{}).length?lg:null);closeOverlay();render();toast("Activity deleted")}
   else if(a==="copyCode"){try{await navigator.clipboard.writeText(UI.newCode.code);toast("Code copied")}catch(e){toast("Select the code and copy it")}}
   else if(a==="shareCode"){const t=`🔐 Your Plate & Progress workout access code${UI.newCode.label?` (${UI.newCode.label})`:""}: *${UI.newCode.code}*\nOpen the app → Workout tab → enter the code. It works once.`;window.open?.("https://wa.me/?text="+encodeURIComponent(t),"_blank");try{await navigator.clipboard.writeText(t)}catch(e){}toast("Message copied for WhatsApp")}
   else if(a==="codeOff"||a==="codeOn"){try{await ACC.db.doc("codes/"+el.dataset.id).update({revoked:a==="codeOff"});await adminLoadCodes();toast(a==="codeOff"?"Code turned off":"Code turned back on")}catch(e){toast("Couldn't update the code.")}}
@@ -2967,8 +2973,11 @@ document.addEventListener("submit",async ev=>{
   else if(f.id==="regForm"){regSave()}
   else if(f.id==="accForm"){await redeemCode($("#accCode").value)}
   else if(f.id==="genForm"){try{await adminGenerate($("#genLabel").value.trim())}catch(e){console.warn(e);toast("Couldn't create the code. Check your connection.")}}
-  else if(f.id==="finishForm"){const p=P();const date=f.dataset.date;const mins=Math.round(+$("#fin_mins").value);if(!(mins>0&&mins<=600)){toast("Enter how many minutes you worked out.");return}const day=workoutFor(p,date);const inten=$("#fin_int").value;const lg=Object.assign({sets:{}},wlogOf(p,date)||{});const first=!lg.done;lg.done=true;lg.mins=mins;lg.intensity=inten;lg.kcal=burnFor(p,day?dayMet(day):5,mins,inten);lg.plan=day?day.name:"Workout";delete lg.start;wlogSet(p,date,lg);closeOverlay();render();if(first){confetti();toast(`Workout saved: ${fmtN(lg.kcal)} kcal burned`)}else toast("Workout updated")}
-  else if(f.id==="actForm"){const p=P();const date=f.dataset.date;const mins=Math.round(+$("#act_m").value);if(!(mins>0)){toast("Enter the minutes.");return}const t=$("#act_t").value,inten=$("#act_i").value;const lg=Object.assign({sets:{}},wlogOf(p,date)||{});lg.acts=(lg.acts||[]).concat([{id:uid(),type:t,mins,intensity:inten,time:$("#act_time").value,kcal:burnFor(p,ACTS[t][1],mins,inten)}]);wlogSet(p,date,lg);closeOverlay();render();toast(`${ACTS[t][0]} logged`)}
+  else if(f.id==="finishForm"){const p=P();const date=f.dataset.date;const mins=Math.round(+$("#fin_mins").value);if(!(mins>0&&mins<=600)){toast("Enter how many minutes you worked out.");return}const day=workoutFor(p,date);const inten=$("#fin_int").value;const lg=Object.assign({sets:{}},wlogOf(p,date)||{});const first=!lg.done;lg.done=true;lg.mins=mins;lg.intensity=inten;lg.kcal=burnFor(p,day?dayMet(day):5,mins,inten);lg.plan=(!first&&lg.plan)?lg.plan:(day?day.name:"Workout");delete lg.start;wlogSet(p,date,lg);closeOverlay();render();if(first){confetti();toast(`Workout saved: ${fmtN(lg.kcal)} kcal burned`)}else toast("Workout updated")}
+  else if(f.id==="actForm"){const p=P();const old=f.dataset.date;const id=f.dataset.id;const date=$("#act_date").value||old;const mins=Math.round(+$("#act_m").value);if(!(mins>0&&mins<=600)){toast("Enter the minutes.");return}if(date>today()){toast("That date is in the future.");return}const t=$("#act_t").value,inten=$("#act_i").value;
+    const item={id:id||uid(),type:t,mins,intensity:inten,time:$("#act_time").value,kcal:burnFor(p,ACTS[t][1],mins,inten)};
+    if(id){const o=Object.assign({},wlogOf(p,old)||{});o.acts=(o.acts||[]).filter(x=>x.id!==id);wlogSet(p,old,o.done||o.acts.length||Object.keys(o.sets||{}).length?o:null)}
+    const lg=Object.assign({sets:{}},wlogOf(p,date)||{});lg.acts=(lg.acts||[]).concat([item]);wlogSet(p,date,lg);closeOverlay();render();toast(id?"Activity updated":`${ACTS[t][0]} logged`)}
   else if(f.id==="goalForm"){setGoal($("#goalIn").value)}
   else if(f.id==="waterEditForm"){const p=P();const w=allEntries(p.id).find(x=>x.id===f.dataset.id);const ml=parseFloat($("#we_ml").value);if(!(ml>0)){toast("Enter an amount in ml.");return}if(w){const nw={...w,ml:Math.round(ml),qty:Math.round(ml)+" ml",time:$("#we_time").value||w.time};removeEntry(p.id,w.id);addEntry(p.id,nw)}closeOverlay();render();toast("Water entry updated")}
   else if(f.id==="myFoodForm"){const old=f.dataset.name;const nn=$("#mf_name").value.trim();if(!nn){toast("Enter a name.");return}const v=[$("#mf_qty").value.trim()||"1 serving",parseFloat($("#mf_k").value)||0,parseFloat($("#mf_p").value)||0,parseFloat($("#mf_c").value)||0,parseFloat($("#mf_f").value)||0,$("#mf_veg").value==="1"?1:0];delete S.myFoods[old];S.myFoods[nn]=v;saveState();closeOverlay();render();toast("Saved food updated")}
