@@ -91,6 +91,12 @@ textarea{resize:vertical}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px;display:grid;gap:12px;min-width:0}
 .panel.flat{background:transparent;border:0;padding:0}
 .tile{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px;display:grid;gap:2px;min-width:0}
+.energy .etot{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}.energy .etot .big{font-size:1.9rem;line-height:1.1}
+.ebar{display:flex;height:12px;border-radius:999px;overflow:hidden;background:var(--line);margin:10px 0 8px}.ebar i{display:block;height:100%}
+.ebar .rest,.edot.rest{background:var(--accent)}.ebar .act,.edot.act{background:var(--accent2)}.ebar .wk,.edot.wk{background:var(--warn)}
+.erows{display:grid;gap:6px;margin:0;padding:0;list-style:none}.erows li{display:flex;align-items:center;gap:8px;font-size:.9rem}.erows li .num{margin-left:auto;font-weight:600}
+.edot{width:10px;height:10px;border-radius:50%;flex:none}
+.ebal{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.ebal>div{background:var(--surface2,var(--surface));border:1px solid var(--line);border-radius:12px;padding:10px;display:grid;gap:2px}
 .tile .big{font-family:var(--f-display);font-size:1.6rem;font-weight:800;line-height:1.1}
 .pill{display:inline-flex;align-items:center;gap:5px;font-size:.75rem;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--sunk);color:var(--muted)}
 .pill.good{background:var(--accent-soft);color:var(--good)}
@@ -913,7 +919,7 @@ async function driveSaveNow(){
   if(DRV.again){DRV.again=false;driveDirty()}
 }
 function driveDirty(){if(!store)return;DRV.dirty=true;if(!DRV.saving){DRV.state="pending";paintStore()}clearTimeout(DRV.timer);DRV.timer=setTimeout(driveSaveNow,2500)}
-function saveState(){driveDirty()}
+function saveState(){driveDirty();if(typeof regSoon==="function")regSoon()}
 function saveMonth(){driveDirty()}
 window.addEventListener("beforeunload",e=>{if(DRV.dirty||DRV.saving){e.preventDefault();e.returnValue=""}});
 
@@ -1814,6 +1820,37 @@ function burnChart(series){
   const bars=series.map((s,i)=>`<rect x="${(L+i*bw+bw*.18).toFixed(1)}" y="${y(s.kcal).toFixed(1)}" width="${(bw*.64).toFixed(1)}" height="${Math.max(0,H-B-y(s.kcal)).toFixed(1)}" rx="3" fill="var(--accent2)"><title>${fmtShort(s.date)}: ${s.kcal} kcal, ${s.mins} min</title></rect>${s.kcal?`<text x="${(L+i*bw+bw/2).toFixed(1)}" y="${(y(s.kcal)-4).toFixed(1)}" text-anchor="middle">${s.mins}m</text>`:""}${i%3===0||i===series.length-1?`<text x="${(L+i*bw+bw/2).toFixed(1)}" y="${H-8}" text-anchor="middle">${fmtShort(s.date)}</text>`:""}`).join("");
   return `<div class="chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Calories burned per day">${g}${bars}</svg></div>`;
 }
+/* Energy burned: resting (Mifflin–St Jeor BMR), everyday movement from the activity level, and workouts.
+   Everyday movement uses a lifestyle factor WITHOUT exercise, so logged workouts aren't counted twice.
+   Without workout tracking, usual exercise is estimated from the activity level instead. */
+const NEAT={sedentary:1.2,light:1.3,moderate:1.35,active:1.4,athlete:1.55};
+function bmrOf(p){const w=currentWeight(p),h=+p.heightCm,a=+p.age;return Math.max(800,10*w+6.25*h-5*a+(p.sex==="m"?5:-161))}
+function energyOn(p,date){
+  const bmr=bmrOf(p); const b=burnedOn(p,date); const nf=NEAT[p.activity]||1.3; const af=ACT[p.activity]?.[0]||1.375;
+  const resting=Math.round(bmr*(1440-Math.min(b.mins||0,1440))/1440);
+  const active=Math.round(bmr*(nf-1));
+  const tracked=hasWorkout(); const workout=tracked?Math.round(b.kcal||0):Math.round(bmr*Math.max(0,af-nf));
+  return {bmr:Math.round(bmr),resting,active,workout,est:!tracked,mins:b.mins||0,total:resting+active+workout};
+}
+function energyBlock(p,date,eaten){
+  const e=energyOn(p,date); const T=e.total||1; const bal=Math.round(eaten-e.total); const isToday=date===today();
+  const goodBal=p.goal==="gain"?bal>=0:p.goal==="maintain"?Math.abs(bal)<=250:bal<=0;
+  return `<section class="panel rise energy">
+    <div class="row"><h2>Calories burned</h2><span class="spacer"></span><span class="pill">${isToday?"Full-day estimate":fmtShort(date)}</span></div>
+    <div class="etot"><span class="big num" data-count="${e.total}">${fmtN(e.total)}</span><span class="muted">kcal total</span></div>
+    <div class="ebar" role="img" aria-label="Resting ${e.resting}, active ${e.active}, workout ${e.workout} kcal"><i class="rest" style="width:${e.resting/T*100}%"></i><i class="act" style="width:${e.active/T*100}%"></i><i class="wk" style="width:${e.workout/T*100}%"></i></div>
+    <ul class="erows">
+      <li><span class="edot rest"></span>Resting <span class="small muted">(your body at rest)</span><span class="num">${fmtN(e.resting)}</span></li>
+      <li><span class="edot act"></span>Active <span class="small muted">(daily movement)</span><span class="num">${fmtN(e.active)}</span></li>
+      <li><span class="edot wk"></span>${e.est?`Exercise <span class="small muted">(usual, estimated)</span>`:`Workout <span class="small muted">(${e.mins?e.mins+" min logged":"none logged"})</span>`}<span class="num">${fmtN(e.workout)}</span></li>
+    </ul>
+    <div class="ebal">
+      <div><span class="label">Eaten</span><span class="num" style="font-weight:700">${fmtN(eaten)} kcal</span></div>
+      <div><span class="label">Balance</span><span class="num" style="font-weight:700;color:var(${goodBal?"--good":"--warn"})">${bal>0?"+":""}${fmtN(bal)} kcal</span><span class="small muted">${bal<0?"deficit":bal>0?"surplus":"even"}</span></div>
+    </div>
+    <p class="small muted" style="margin:10px 0 0">Estimated from your age, sex, height, latest weight and activity level (${esc((ACT[p.activity]?.[1]||"").split(" (")[0])}).${e.est?" Unlock workout tracking to count your real sessions instead of the usual-exercise estimate.":""}</p>
+  </section>`;
+}
 function activitySection(p){
   if(!hasWorkout()) return `<section class="panel"><div class="row"><h2>Workouts &amp; calories burned</h2><span class="spacer"></span><span class="chip">Members only</span></div><p class="small muted" style="margin:0">Workout tracking is an exclusive feature. Enter an access code from the admin on the Workout tab to see minutes and calories burned here.</p><div class="row"><button data-act="tab" data-tab="workout">Enter access code</button></div></section>`;
   const days=[]; for(let i=13;i>=0;i--){const d=addDays(today(),-i);const b=burnedOn(p,d);days.push({date:d,...b})}
@@ -1869,7 +1906,7 @@ function adminPanel(){
   const list=UI.codes||[]; const nc=UI.newCode;
   const entry=nc?JSON.stringify({h:nc.h,label:nc.label||"",who:maskEmail(nc.email),created:today()}):"";
   return `<section class="panel admin rise">
-    <div class="row"><span class="chip">Admin</span><h3>Workout access codes</h3></div>
+    <div class="row"><span class="chip">Admin</span><h3>Workout access codes</h3><span class="spacer"></span>${PP.config.REGISTER_SHEET_URL?`<a class="btn" href="${esc(PP.config.REGISTER_SHEET_URL)}" target="_blank" rel="noopener">Open sign-up register</a>`:""}</div>
     <p class="small muted" style="margin:0">Only you see this. Each code works for one Google account. After you create a code, add the line shown to <b>access-codes.json</b> in your GitHub repository; the code starts working once that change is live (usually within a minute).</p>
     <form id="genForm" class="grid g2" novalidate>
       <label class="field"><span>Their Gmail address</span><input id="genEmail" type="email" placeholder="ravi@gmail.com" autocomplete="off"></label>
@@ -1931,6 +1968,66 @@ function offPick(i){
   st.innerHTML=`<span style="color:var(--good)">Filled in for ${esc(v.qty)}.</span> <span class="muted">From Open Food Facts, a free community database. Check it against your pack label${v.per==="100g"?"; values are per 100 g, so set \"Times this amount\" for your portion (e.g. 0.3 for 30 g)":""}.</span>`;
 }
 
+/* ============ Hosted version: sign-up register (admin's Google Sheet) ============
+   Switched on by REGISTER_ENDPOINT in config.js. Sends ONLY: the Google account (checked server-side from the
+   sign-in token), profile name, optional phone, offers consent, and whether progress is positive or negative.
+   No weights, meals, workouts or body details leave the user's Drive. */
+const regOn=()=>!!(PP.config&&PP.config.REGISTER_ENDPOINT);
+function regProgress(p){
+  const ws=(S.weights[p.id]||[]).slice().sort((a,b)=>a.date<b.date?-1:1);
+  if(ws.length<2) return "Not enough data";
+  const start=+(p.startWeight||ws[0].kg), now=+ws[ws.length-1].kg, d=now-start;
+  if(p.goal==="maintain") return Math.abs(d)<=1?"Positive":"Negative";
+  if(Math.abs(d)<0.5) return "No change";
+  const good=p.goal==="gain"?d>0:d<0;
+  return good?"Positive":"Negative";
+}
+function regText(){
+  return `Your name, Google email, when you joined and last used the app, and whether your progress is positive or negative are shared with the app's admin. Your weight, meals, workouts and body details stay only in your own Google Drive.`;
+}
+function regFields(r){
+  r=r||{};
+  return `<div class="grid g2">
+      <label class="field"><span>Phone / WhatsApp (optional)</span><input id="rg_phone" inputmode="tel" maxlength="20" placeholder="91 98xxxxxxxx" value="${esc(r.phone||"")}"></label>
+      <label class="small" style="display:flex;flex-wrap:nowrap;align-items:center;gap:10px;align-self:end;padding-bottom:10px;cursor:pointer"><input type="checkbox" id="rg_offers" style="width:18px;height:18px;flex:none;margin:0" ${r.offers?"checked":""}><span>Send me offers on related products and services (optional)</span></label>
+    </div>`;
+}
+function regPanel(){
+  if(!regOn()||!S.profiles.length) return "";
+  const r=S.reg||{};
+  return `<section class="panel rise">
+    <div class="row"><h3>Shared with the admin</h3><span class="spacer"></span>${r.offers?`<span class="pill good">Offers on</span>`:`<span class="pill">Offers off</span>`}</div>
+    <p class="small muted" style="margin:0">${regText()} You can change your contact choices here at any time.</p>
+    <form id="regForm" novalidate>${regFields(r)}<div class="row"><button class="primary" type="submit">Save</button></div></form>
+  </section>`;
+}
+function regCapture(){
+  const ph=$("#rg_phone"), of=$("#rg_offers"); if(!ph&&!of) return;
+  UI.pendingReg={phone:(ph&&ph.value||"").replace(/[^\d+ ]/g,"").trim().slice(0,20),offers:!!(of&&of.checked),at:new Date().toISOString()};
+}
+function regSave(){
+  regCapture(); const prev=S.reg||{}; const n=UI.pendingReg; UI.pendingReg=null; if(!n) return;
+  S.reg={phone:n.phone,offers:n.offers,offersAt:n.offers!==!!prev.offers?n.at:(prev.offersAt||n.at)};
+  saveState(); render(); toast(S.reg.offers?"Saved. You'll hear about offers.":"Saved. No offers will be sent."); regSync(true);
+}
+let regTimer=null;
+function regSoon(){ if(!regOn()) return; clearTimeout(regTimer); regTimer=setTimeout(()=>regSync(false),4000) }
+async function regSync(force){
+  try{
+    if(!regOn()||!PP.signedIn||!S.profiles.length) return;
+    if(UI.pendingReg&&!S.reg){S.reg={phone:UI.pendingReg.phone,offers:UI.pendingReg.offers,offersAt:UI.pendingReg.at};UI.pendingReg=null;saveState()}
+    if(!S.regNoticed){S.regNoticed=true;saveState();setTimeout(()=>toast("Your name, Gmail and progress status are shared with the admin. See Profile & data."),1500)}
+    const r=S.reg||{};
+    const body={profiles:S.profiles.map(p=>({pid:p.id,name:String(p.name||"").slice(0,60),progress:regProgress(p)})),phone:r.phone||"",offers:!!r.offers,offersAt:r.offersAt||""};
+    const key=JSON.stringify(body)+"|"+today(); const lk="pp_reg_"+(PP.user&&PP.user.sub);
+    let last=""; try{last=localStorage.getItem(lk)||""}catch(e){}
+    if(!force&&last===key) return;
+    const t=await PP.token();
+    await fetch(PP.config.REGISTER_ENDPOINT,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({...body,token:t})});
+    try{localStorage.setItem(lk,key)}catch(e){}
+  }catch(e){ /* best effort: tries again on the next change or the next day */ }
+}
+
 /* ============ Rendering ============ */
 function render(){
   if(UI.locked){ $("#main").innerHTML=lockView(UI.locked); return }
@@ -1975,6 +2072,7 @@ function viewToday(p){
     <div class="row"><h2>${fmtDay(UI.date)}</h2><span class="spacer"></span>${plansOf(p).length?`<label class="field" style="width:auto"><span>Diet plan for this day</span><select id="dayPlan">${planOptions(p,S.planByDate?.[p.id]?.[UI.date]||"",true).replace('Follow schedule','Follow schedule ('+esc(planName(p,(p.planSchedule?.[dayKey(UI.date)])||p.defaultPlanId||"calc"))+')')}</select></label>`:""}</div>
     ${macroBars(t,plan)}
   </section>
+  ${energyBlock(p,UI.date,t.kcal)}
   ${hydrationBlock(p)}
   </aside></div>`.replace("@@MEALS@@",MEALS.map(([k,lab])=>{
     const es=entriesOn(p.id,UI.date,k); const mt=totals(es); const tg=plan.meals[k];
@@ -2132,10 +2230,11 @@ function viewProgress(p){
     ${ws.length?`<details><summary class="small">Weight entries (${ws.length})</summary><div class="scroll"><table><tbody>${ws.map(w=>`<tr><td>${fmtDay(w.date)}</td><td class="r num">${r1(w.kg)} kg</td><td class="r num">BMI ${r1(bmi(w.kg,p.heightCm))}</td><td class="r"><button class="ghost" data-act="delW" data-date="${w.date}">Remove</button></td></tr>`).join("")}</tbody></table></div></details>`:""}
   </section>
   <section class="panel">
-    <div class="row"><h2>Calories, last 14 days</h2><span class="spacer"></span><span class="pill num">avg ${fmtN(avg)} kcal</span><span class="pill num">avg protein ${r0(avgP)}g / ${r0(pl.p)}g</span></div>
+    <div class="row"><h2>Calories, last 14 days</h2><span class="spacer"></span><span class="pill num">avg ${fmtN(avg)} kcal</span><span class="pill num">avg protein ${r0(avgP)}g / ${r0(pl.p)}g</span>${logged.length?`<span class="pill num">avg burned ${fmtN(sum(logged.map(s=>({k:energyOn(p,s.date).total})),"k")/logged.length)} kcal</span>`:""}</div>
     ${kcalChart(s14)}
-    <div class="scroll"><table><thead><tr><th>Date</th><th class="r">Calories</th><th class="r">Protein</th><th class="r">Carbs</th><th class="r">Fat</th><th class="r">Items</th></tr></thead>
-    <tbody>${s14.slice().reverse().map(s=>`<tr><td>${fmtDay(s.date)}</td><td class="r num">${s.n?fmtN(s.kcal):"—"}</td><td class="r num">${s.n?r0(s.p)+"g":"—"}</td><td class="r num">${s.n?r0(s.c)+"g":"—"}</td><td class="r num">${s.n?r0(s.f)+"g":"—"}</td><td class="r num">${s.n}</td></tr>`).join("")}</tbody></table></div>
+    <div class="scroll"><table><thead><tr><th>Date</th><th class="r">Eaten</th><th class="r">Burned</th><th class="r">Balance</th><th class="r">Workout</th><th class="r">Protein</th><th class="r">Carbs</th><th class="r">Fat</th></tr></thead>
+    <tbody>${s14.slice().reverse().map(s=>{const e=energyOn(p,s.date);const bal=Math.round(s.kcal-e.total);const pre=p.startDate&&s.date<p.startDate&&!s.n;return `<tr><td>${fmtDay(s.date)}</td><td class="r num">${s.n?fmtN(s.kcal):"—"}</td><td class="r num">${pre?"—":fmtN(e.total)}</td><td class="r num">${s.n?(bal>0?"+":"")+fmtN(bal):"—"}</td><td class="r num">${e.est?"—":e.workout?fmtN(e.workout):"—"}</td><td class="r num">${s.n?r0(s.p)+"g":"—"}</td><td class="r num">${s.n?r0(s.c)+"g":"—"}</td><td class="r num">${s.n?r0(s.f)+"g":"—"}</td></tr>`}).join("")}</tbody></table></div>
+    <p class="small muted" style="margin:6px 0 0">Burned = resting + daily movement + workouts, estimated from your profile. Balance = eaten − burned; a negative number is a deficit.</p>
   </section>
   ${activitySection(p)}`;
 }
@@ -2144,7 +2243,7 @@ function viewProfile(p){
   const editing=UI.newProfile? null : p;
   const v=editing||{name:"",sex:"m",age:"",heightCm:"",weightKg:"",activity:"moderate",goal:"lose",targetWeight:"",pref:"both",trainerName:"",trainerPhone:""};
   const intro=!S.profiles.length?`<div class="hero-empty"><h2>Set up a profile</h2><p class="muted" style="max-width:60ch">Enter height and weight to get BMI, a daily calorie and protein target, and a meal-by-meal diet chart. Recipes, the food log and progress tracking all build on this profile. You'll sign in with Google so the log is kept as an Excel file in your own Google Drive.</p></div>`:"";
-  return `${intro}${adminPanel()}
+  return `${intro}${adminPanel()}${regPanel()}
   <form class="panel" id="pForm">
     <div class="row"><h2>${editing?"Edit profile":"New profile"}</h2><span class="spacer"></span>${S.profiles.length&&!editing?`<button type="button" class="ghost" data-act="cancelNew">Cancel</button>`:""}${editing?`<button type="button" data-act="newProfile">Add another person</button>`:""}</div>
     ${readerOK()?`<div class="upload"><div><b>Optional: fill from a BMI or body-composition report</b><div class="small muted">Upload the PDF or a photo of the report and the fields below are filled in for you to check.</div></div>
@@ -2167,7 +2266,7 @@ function viewProfile(p){
       <label class="field"><span>Trainer's name</span><input id="f_tn" value="${esc(v.trainerName)}"></label>
       <label class="field"><span>Trainer's WhatsApp number (with country code)</span><input id="f_tp" inputmode="tel" placeholder="91 98xxxxxxxx" value="${esc(v.trainerPhone)}"></label>
     </div>
-    ${editing?"":`<div class="gate"><span class="g-logo" aria-hidden="true">G</span><div><b>Google account required</b><div class="small muted">When you create the profile you'll be asked to allow access to your Google Drive. The food log is kept as an Excel file there and updated as you log meals and weight. Without access the profile can't be created.</div></div></div>`}
+    ${editing?"":`<div class="gate"><span class="g-logo" aria-hidden="true">G</span><div><b>Google account required</b><div class="small muted">When you create the profile you'll be asked to allow access to your Google Drive. The food log is kept as an Excel file there and updated as you log meals and weight. Without access the profile can't be created.</div></div></div>${regOn()&&!S.profiles.length?`<div class="note small">${regText()}</div>${regFields(S.reg)}`:""}`}
     ${UI.gateError?`<div class="gate-error" role="alert"><b>${esc(UI.gateError.title)}</b><div>${esc(UI.gateError.body)}</div></div>`:""}
     <div class="row"><button class="primary" type="submit" ${UI.creating?"disabled":""}>${editing?"Save changes":UI.creating?"Waiting for Google access…":"Sign in with Google and create profile"}</button>${editing?`<span class="muted small">Log new weights on the Progress tab; the diet chart uses the latest one.</span>`:""}</div>
   </form>
@@ -2217,6 +2316,7 @@ function dayText(p,date,plain){
     for(const [k,l] of MEALS){const es=entriesOn(p.id,date,k);lines.push("",`*${l}*`+(es.length?` (${r0(sum(es,"kcal"))} kcal)`:""));if(!es.length)lines.push("• —");es.forEach(e=>lines.push(waLine(e,false)))}
     lines.push("",`Total: ${fmtN(t.kcal)} / ${fmtN(pl.target)} kcal | P ${r0(t.p)}g | C ${r0(t.c)}g | F ${r0(t.f)}g`,`Water: ${r1(wml/1000)} / ${r1(wg/1000)} L`);
     if(cof.length) lines.push(`Black coffee: ${cof.length} cup${cof.length>1?"s":""} (${cof.map(e=>fmtTime(e.time)).join(", ")})`);
+    {const en=energyOn(p,date);const bl=Math.round(t.kcal-en.total);lines.push(`Burned (est.): ${fmtN(en.total)} kcal (resting ${fmtN(en.resting)}, active ${fmtN(en.active)}, ${en.est?"exercise":"workout"} ${fmtN(en.workout)}) | Balance ${bl>0?"+":""}${fmtN(bl)} kcal`)}
     return lines.join("\n");
   }
   const lines=[`📒 *DAILY FOOD LOG*`,`📅 ${fmtDay(date)}`,`👤 ${p.name} · ⚖️ ${r1(pl.weight)} kg${planNm?`\n📋 Plan: ${planNm}`:""}`,`━━━━━━━━━━━━━━`];
@@ -2227,7 +2327,8 @@ function dayText(p,date,plain){
   lines.push("",`━━━━━━━━━━━━━━`,`🔥 *Total:* ${fmtN(t.kcal)} / ${fmtN(pl.target)} kcal`,`💪 Protein ${r0(t.p)} / ${r0(pl.p)} g`,`🍚 Carbs ${r0(t.c)} g · 🥑 Fat ${r0(t.f)} g`,
     `💧 Water ${r1(wml/1000)} / ${r1(wg/1000)} L  ${"🟦".repeat(water)}${"⬜".repeat(10-water)}`);
   if(cof.length) lines.push(`☕ Black coffee: ${cof.length} cup${cof.length>1?"s":""} (${cof.map(e=>fmtTime(e.time)).join(", ")})`);
-  const bd=burnedOn(p,date); if(bd.kcal) lines.push(`🏋️ Burned: ${fmtN(bd.kcal)} kcal in ${bd.mins} min`);
+  const bd=burnedOn(p,date); if(bd.kcal) lines.push(`🏋️ Workout: ${fmtN(bd.kcal)} kcal in ${bd.mins} min`);
+  {const en=energyOn(p,date);const bl=Math.round(t.kcal-en.total);lines.push(`⚡ Burned (est.): ${fmtN(en.total)} kcal · resting ${fmtN(en.resting)} · active ${fmtN(en.active)} · ${en.est?"exercise":"workout"} ${fmtN(en.workout)}`,`⚖️ Balance: ${bl>0?"+":""}${fmtN(bl)} kcal`)}
   lines.push(statusLine(pl.target-t.kcal,true));
   return lines.join("\n");
 }
@@ -2353,7 +2454,7 @@ function buildWorkbook(p){
     .map(e=>({"Date":e.date,"Time":e.time||"","Meal":MEALS.find(m=>m[0]===e.meal)?.[1]||e.meal,"Food":e.name,"Quantity":e.qty||"","Calories":r0(e.kcal),"Protein (g)":r1(e.p),"Carbs (g)":r1(e.c),"Fat (g)":r1(e.f),"Type":e.veg?"Veg":"Non-veg","Source":e.source==="recipe"?"Recipe suggestion":e.source==="import"?"Excel import":"Added manually","Entry ID":e.id}));
   const pl=calcPlan(p);
   const byDay={};foodEntries(p.id).forEach(e=>{(byDay[e.date]=byDay[e.date]||[]).push(e)});
-  const summary=Object.keys(byDay).sort().map(d=>{const t=totals(byDay[d]);return {"Date":d,"Calories":r0(t.kcal),"Target":r0(pl.target),"Difference":r0(t.kcal-pl.target),"Protein (g)":r0(t.p),"Carbs (g)":r0(t.c),"Fat (g)":r0(t.f),"Items":byDay[d].length,"Water (L)":r1(sum(waterOn(p.id,d),"ml")/1000)}});
+  const summary=Object.keys(byDay).sort().map(d=>{const t=totals(byDay[d]);return {"Date":d,"Calories":r0(t.kcal),"Target":r0(pl.target),"Difference":r0(t.kcal-pl.target),"Protein (g)":r0(t.p),"Carbs (g)":r0(t.c),"Fat (g)":r0(t.f),"Items":byDay[d].length,"Water (L)":r1(sum(waterOn(p.id,d),"ml")/1000),...(()=>{const en=energyOn(p,d);return {"Resting (kcal)":en.resting,"Active (kcal)":en.active,[en.est?"Exercise est. (kcal)":"Workout (kcal)"]:en.workout,"Total burned (kcal)":en.total,"Balance (kcal)":r0(t.kcal-en.total)}})()}});
   const weights=(S.weights[p.id]||[]).slice().sort((a,b)=>a.date<b.date?-1:1).map(w=>({"Date":w.date,"Weight (kg)":w.kg,"BMI":r1(bmi(w.kg,p.heightCm))}));
   const chart=MEALS.map(([k,l])=>({"Meal":l,"Calories":r0(pl.meals[k].kcal),"Protein (g)":r0(pl.meals[k].p),"Carbs (g)":r0(pl.meals[k].c),"Fat (g)":r0(pl.meals[k].f),"Trainer's foods":(pl.meals[k].items||[]).join("; "),"Source":pl.source==="trainer"?"Trainer's plan":"Calculated"}));
   chart.push({"Meal":"Day total","Calories":r0(pl.target),"Protein (g)":r0(pl.p),"Carbs (g)":r0(pl.c),"Fat (g)":r0(pl.f)});
@@ -2860,9 +2961,10 @@ document.addEventListener("submit",async ev=>{
     const d={name:$("#f_name").value.trim(),sex:$("#f_sex").value,age:+$("#f_age").value,heightCm:+$("#f_h").value,activity:$("#f_act").value,goal:$("#f_goal").value,targetWeight:$("#f_tw").value?+$("#f_tw").value:"",pref:$("#f_pref").value,trainerName:$("#f_tn").value.trim(),trainerPhone:$("#f_tp").value.trim()};
     const w=+$("#f_w").value;
     if(editing){Object.assign(editing,d,{startWeight:w});if(!(S.weights[editing.id]||[]).length){editing.weightKg=w}saveState();scheduleSync();toast("Profile saved");render()}
-    else if(!UI.creating){await createProfileWithGoogle(d,w)}
+    else if(!UI.creating){regCapture();await createProfileWithGoogle(d,w)}
   }
   else if(f.id==="tpForm"){savePlanSafe()}
+  else if(f.id==="regForm"){regSave()}
   else if(f.id==="accForm"){await redeemCode($("#accCode").value)}
   else if(f.id==="genForm"){try{await adminGenerate($("#genLabel").value.trim())}catch(e){console.warn(e);toast("Couldn't create the code. Check your connection.")}}
   else if(f.id==="finishForm"){const p=P();const date=f.dataset.date;const mins=Math.round(+$("#fin_mins").value);if(!(mins>0&&mins<=600)){toast("Enter how many minutes you worked out.");return}const day=workoutFor(p,date);const inten=$("#fin_int").value;const lg=Object.assign({sets:{}},wlogOf(p,date)||{});const first=!lg.done;lg.done=true;lg.mins=mins;lg.intensity=inten;lg.kcal=burnFor(p,day?dayMet(day):5,mins,inten);lg.plan=day?day.name:"Workout";delete lg.start;wlogSet(p,date,lg);closeOverlay();render();if(first){confetti();toast(`Workout saved: ${fmtN(lg.kcal)} kcal burned`)}else toast("Workout updated")}
@@ -2904,6 +3006,7 @@ async function bootApp(){
   let acc=S.accent; try{acc=localStorage.getItem("pp_accent")||acc}catch(e){} setAccent(acc);
   render();
   if(UI.migrated) setTimeout(()=>toast("Your data has moved to your Google Drive and was removed from Claude's storage."),600);
+  regSync(false);
   if(window.claude&&claude.use){ claude.use("sample").then(async s=>{sampleFn=s; if(s){UI.limits=await s.limits().catch(()=>null); if(["recipes","plan","profile"].includes(UI.tab)&&!UI.creating)render()}}).catch(()=>{}) }
 }
 bootApp();
