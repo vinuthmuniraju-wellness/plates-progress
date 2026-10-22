@@ -1889,6 +1889,48 @@ async function adminGenerate(){
   UI.newCode={code,label,email,h}; render(); toast("Code created. Add the line to access-codes.json.");
 }
 
+/* ============ Hosted version: free nutrition lookup (Open Food Facts) ============
+   Used when the AI helper isn't set up. Searches the free Open Food Facts database (packaged and branded foods)
+   straight from the browser: no key, no account, and only the typed food name is sent. */
+const OFF_FIX={protien:"protein",protine:"protein",proteen:"protein",wey:"whey",whay:"whey",biscut:"biscuit",chocklate:"chocolate",choclate:"chocolate",panner:"paneer",yougurt:"yogurt",yoghurt:"yogurt"};
+const offClean=s=>String(s||"").toLowerCase().replace(/[^a-z0-9 ]+/g," ").split(/\s+/).filter(Boolean).map(w=>OFF_FIX[w]||w).join(" ");
+async function offSearch(q){
+  const ctl=new AbortController(); const tm=setTimeout(()=>ctl.abort(),15000);
+  try{
+    const u="https://world.openfoodfacts.org/cgi/search.pl?search_simple=1&action=process&json=1&page_size=12&fields=code,product_name,brands,serving_size,nutriments,countries_tags&search_terms="+encodeURIComponent(q);
+    const r=await fetch(u,{signal:ctl.signal}); if(!r.ok) throw new Error("http "+r.status);
+    const j=await r.json(); return Array.isArray(j.products)?j.products:[];
+  } finally {clearTimeout(tm)}
+}
+function offValues(pr){
+  const n=pr.nutriments||{}; const num=v=>{const x=parseFloat(v);return isFinite(x)?x:null};
+  const kcalOf=sfx=>num(n["energy-kcal_"+sfx])??(num(n["energy_"+sfx])!=null&&(n.energy_unit||"kJ")!=="kcal"?num(n["energy_"+sfx])/4.184:num(n["energy_"+sfx]));
+  const per=kcalOf("serving")!=null&&pr.serving_size?"serving":"100g";
+  const kcal=kcalOf(per); if(kcal==null) return null;
+  return {qty:per==="serving"?String(pr.serving_size):"100 g",kcal,p:num(n["proteins_"+per])||0,c:num(n["carbohydrates_"+per])||0,f:num(n["fat_"+per])||0,
+    name:[pr.brands&&String(pr.brands).split(",")[0].trim(),pr.product_name].filter(Boolean).join(" ").trim()||pr.product_name||"",per};
+}
+async function offLookup(){
+  const st=$("#ff_status"); const typed=$("#ff_name").value.trim();
+  if(!typed){st.innerHTML=`<span style="color:var(--bad)">Type the food's name first, e.g. the brand and product.</span>`;return}
+  const q=offClean(typed); st.innerHTML=`<span class="muted">Searching the Open Food Facts database for ${esc(q)}…</span>`;
+  let list=[];
+  try{
+    list=await offSearch(q);
+    if(!list.length&&q.split(" ").length>2) list=await offSearch(q.split(" ").slice(0,3).join(" "));
+  }catch(e){st.innerHTML=`<span style="color:var(--bad)">The nutrition database didn't answer. Check your connection and try again, or enter the values from the pack label.</span>`;return}
+  const rows=list.map(pr=>({pr,v:offValues(pr),in:(pr.countries_tags||[]).includes("en:india")})).filter(x=>x.v&&x.v.name)
+    .sort((a,b)=>(b.in-a.in)).slice(0,6);
+  UI._off=rows.map(x=>x.v);
+  if(!rows.length){st.innerHTML=`<span style="color:var(--bad)">No match for "${esc(typed)}". This lookup covers packaged and branded foods; check the spelling or try just the brand and product (e.g. "whole truth whey"). For home-cooked food, enter the values yourself.</span>`;return}
+  st.innerHTML=`<div class="small muted" style="margin:4px 0">Pick the closest match:</div><div class="col" style="display:grid;gap:6px">${rows.map((x,i)=>`<button type="button" style="text-align:left;justify-content:flex-start;width:100%;display:block;line-height:1.35" data-act="offPick" data-i="${i}"><b>${esc(x.v.name)}</b> <span class="muted">· ${r0(x.v.kcal)} kcal, ${r1(x.v.p)} g protein per ${esc(x.v.qty)}${x.in?" · India":""}</span></button>`).join("")}</div>`;
+}
+function offPick(i){
+  const v=(UI._off||[])[i]; if(!v) return; const st=$("#ff_status");
+  fillFood({name:v.name,qty:v.qty,kcal:v.kcal,p:v.p,c:v.c,f:v.f}); $("#ff_mult").value=1; $("#ff_save").checked=true;
+  st.innerHTML=`<span style="color:var(--good)">Filled in for ${esc(v.qty)}.</span> <span class="muted">From Open Food Facts, a free community database. Check it against your pack label${v.per==="100g"?"; values are per 100 g, so set \"Times this amount\" for your portion (e.g. 0.3 for 30 g)":""}.</span>`;
+}
+
 /* ============ Rendering ============ */
 function render(){
   if(UI.locked){ $("#main").innerHTML=lockView(UI.locked); return }
@@ -2221,10 +2263,10 @@ function openAddFood(meal,entryId){
       <label class="field"><span>Time you ate</span><input type="time" id="ff_time" value="${timeFor(UI.date,meal)}"></label>
     </div>
     <label class="field"><span>Food — start typing to search ${fmtN(Object.keys(FOODS).length+mine.length)} foods</span><input id="ff_name" list="foodList" autocomplete="off" placeholder="e.g. masala dosa, chicken tikka, poha"><datalist id="foodList">${mine.map(f=>`<option value="${esc(f)}" label="My foods"></option>`).join("")}${Object.keys(FOODS).filter(f=>!mine.includes(f)).map(f=>`<option value="${esc(f)}"></option>`).join("")}</datalist></label>
-    ${readerOK()?`<div class="lookup">
-      <div class="small muted" id="ff_hint">Not in the list? Type the food and look it up, or scan the nutrition label on the pack.</div>
-      <div class="row"><button type="button" data-act="lookupFood">Look up nutrition</button><label class="btn" for="ff_photo">Scan label or food photo</label><input type="file" id="ff_photo" accept="image/jpeg,image/png,image/webp,application/pdf" hidden></div>
-      <div id="ff_status" class="small" role="status"></div></div>`:""}
+    <div class="lookup">
+      <div class="small muted" id="ff_hint">${readerOK()?"Not in the list? Type the food and look it up, or scan the nutrition label on the pack.":"Not in the list? Type the brand and product, then tap Look up nutrition."}</div>
+      <div class="row"><button type="button" data-act="lookupFood">Look up nutrition</button>${readerOK()?`<label class="btn" for="ff_photo">Scan label or food photo</label><input type="file" id="ff_photo" accept="image/jpeg,image/png,image/webp,application/pdf" hidden>`:""}</div>
+      <div id="ff_status" class="small" role="status"></div></div>
     <div class="grid g2">
       <label class="field"><span>Quantity</span><input id="ff_qty" placeholder="e.g. 2 rotis, 1 cup"></label>
       <label class="field"><span>Times this amount</span><input id="ff_mult" type="number" inputmode="decimal" min="0.25" step="any" value="1"></label>
@@ -2248,7 +2290,7 @@ function openAddFood(meal,entryId){
   nm.addEventListener("input",()=>{
     const f=foodInfo(nm.value); const hint=$("#ff_hint");
     if(f){fillFood({qty:f[0],kcal:f[1],p:f[2],c:f[3],f:f[4],veg:!!f[5]});$("#ff_save").checked=false;if(hint)hint.textContent=S.myFoods?.[nm.value]?"From My foods.":"From the food list."}
-    else if(hint) hint.textContent=nm.value.trim().length>2?`"${nm.value.trim()}" isn't in the list. Tap Look up nutrition, or enter the values yourself.`:"Not in the list? Type the food and look it up, or scan the nutrition label on the pack.";
+    else if(hint) hint.textContent=nm.value.trim().length>2?`"${nm.value.trim()}" isn't in the list. Tap Look up nutrition, or enter the values yourself.`:(readerOK()?"Not in the list? Type the food and look it up, or scan the nutrition label on the pack.":"Not in the list? Type the brand and product, then tap Look up nutrition.");
   });
 }
 function fillFood(v){
@@ -2777,7 +2819,8 @@ document.addEventListener("click",async ev=>{
   else if(a==="clearGoal"){delete p.kcalGoal;saveState();scheduleSync();render();toast("Goal cleared. Using the plan's own calories.")}
   else if(a==="coachShuffle"){UI.coachOffset=(UI.coachOffset||0)+1;UI._view=null;render()}
   else if(a==="quickAdd"){const n=el.dataset.name,f=FOODS[n];addEntry(p.id,{id:uid(),date:UI.date,time:timeFor(UI.date,defaultMeal()),meal:defaultMeal(),name:n,qty:f[0],kcal:f[1],p:f[2],c:f[3],f:f[4],veg:!!f[5],source:"custom"});render();toast(`Added ${n} to ${MEALS.find(m=>m[0]===defaultMeal())[1]}`)}
-  else if(a==="lookupFood"){lookupFood()}
+  else if(a==="lookupFood"){readerOK()?lookupFood():offLookup()}
+  else if(a==="offPick"){offPick(+el.dataset.i)}
   else if(a==="delMyFood"){delete S.myFoods[el.dataset.name];saveState();render();toast("Removed from My foods")}
   else if(a==="resetKcal"){resetKcal(el.dataset.plan)}
   else if(a==="planShuffle"){UI.planRecOffset=(UI.planRecOffset||0)+1;render()}
