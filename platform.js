@@ -20,21 +20,26 @@
     });
   }
   /* opens Google's sign-in / consent popup; call it from a click */
-  async function signIn(){
+  /* opt.reauth: renew an expired session for the same account without asking again.
+     Otherwise Google shows its account chooser, so people with several Google accounts can pick one. */
+  async function signIn(opt={}){
     if(!CFG.GOOGLE_CLIENT_ID||/PASTE-YOUR/.test(CFG.GOOGLE_CLIENT_ID)) throw {code:"not_configured",message:"The site owner hasn't added the Google client ID in config.js yet."};
     await gisReady();
     let hint=""; try{hint=localStorage.getItem(hintKey)||""}catch(e){}
     return new Promise((res,rej)=>{
       const client=google.accounts.oauth2.initTokenClient({
-        client_id:CFG.GOOGLE_CLIENT_ID, scope:SCOPES, prompt:"", login_hint:hint||undefined,
+        client_id:CFG.GOOGLE_CLIENT_ID, scope:SCOPES,
+        prompt:(opt.reauth&&hint)?"":"select_account", login_hint:(opt.reauth&&hint)?hint:undefined,
         callback: async r=>{
           if(r.error){rej({code:r.error==="access_denied"?"not_in_manifest":"needs_reauth",message:r.error_description||r.error});return}
           if(!google.accounts.oauth2.hasGrantedAllScopes(r,"https://www.googleapis.com/auth/drive.file")){rej({code:"not_in_manifest",message:"Google Drive access wasn't allowed."});return}
           S.token=r.access_token; S.exp=Date.now()+(Number(r.expires_in||3600)-60)*1000;
+          const prevSub=S.user&&S.user.sub;
           try{
             const u=await fetch("https://www.googleapis.com/oauth2/v3/userinfo",{headers:{Authorization:"Bearer "+S.token}}).then(x=>x.json());
             S.user={sub:u.sub,email:(u.email||"").toLowerCase(),name:u.name||u.given_name||"",picture:u.picture||""};
             try{localStorage.setItem(hintKey,S.user.email)}catch(e){}
+            if(opt.reauth&&prevSub&&prevSub!==S.user.sub){location.reload();return}
             res(S.user);
           }catch(e){rej({code:"server_unavailable",message:"Couldn't read your Google profile."})}
         },
@@ -50,6 +55,7 @@
   }
   function signOut(){
     try{ if(S.token&&window.google) google.accounts.oauth2.revoke(S.token,()=>{}) }catch(e){}
+    try{localStorage.removeItem(hintKey)}catch(e){}
     S.token=null; S.user=null; location.reload();
   }
 
@@ -176,7 +182,7 @@
       return null;
     }
   };
-  window.PP={signIn,signOut,get user(){return S.user},get signedIn(){return !!S.user},tokenExpired:()=>!(S.token&&Date.now()<S.exp),config:CFG};
+  window.PP={signIn,signOut,token,get user(){return S.user},get signedIn(){return !!S.user},tokenExpired:()=>!(S.token&&Date.now()<S.exp),config:CFG};
 
   /* installable app: register the offline shell */
   if("serviceWorker" in navigator&&location.protocol==="https:") window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
