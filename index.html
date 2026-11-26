@@ -2037,7 +2037,7 @@ function render(){
   document.querySelectorAll("#tabs button").forEach(b=>b.setAttribute("aria-selected",String(b.dataset.tab===UI.tab)));
   const sw=$("#profileSwitch");
   if(S.profiles.length>1){sw.hidden=false;sw.innerHTML=S.profiles.map(p=>`<option value="${p.id}" ${p.id===S.activeId?"selected":""}>${esc(p.name)}</option>`).join("")}else sw.hidden=true;
-  const m=$("#main"); const p=P(); paintSync(); const so=$("#signOutBtn"); if(so) so.hidden=!PP.signedIn;
+  const m=$("#main"); const p=P(); paintSync(); const so=$("#signOutBtn"); if(so){so.hidden=!PP.signedIn;if(PP.signedIn&&PP.user){so.title="Signed in as "+PP.user.email+". Sign out to switch account.";so.textContent=innerWidth<520?"Sign out":"Sign out · "+PP.user.email}}
   if(!p && UI.tab!=="profile"){UI.tab="profile";return render()}
   const key=UI.tab+"|"+UI.date+"|"+(p&&p.id); const fresh=UI._view!==key; UI._view=key;
   m.classList.toggle("anim",fresh);
@@ -2743,7 +2743,8 @@ function planOptions(p,sel,withAuto){
 function trainerPanel(p){
   const ps=plansOf(p);
   const up=readerOK()?uploadBox("planFile","planStatus",ps.length?"Add more trainer plans":"Optional: use the trainer's diet plans","Upload one or more plans as PDFs or photos. A single file can hold several plans, such as a veg and a non-veg plan; each is read separately and you check it before saving.",ps.length?"Upload plans":"Upload diet plans",true):"";
-  if(!ps.length) return up?`<section class="panel">${up}</section>`:"";
+  const manualBtn=`<div class="row"><button type="button" data-act="manualPlan">${readerOK()?"Or type in a plan by hand":"+ Add trainer's plan"}</button><span class="small muted">${readerOK()?"Useful when you don't have the file.":"Type the foods for each meal and the calories from the trainer's chart."}</span></div>`;
+  if(!ps.length) return `<section class="panel"><div class="row"><h2>Trainer's diet plans</h2><span class="spacer"></span><span class="pill">Optional</span></div><p class="small muted" style="margin:0">Add one or more plans from your trainer, such as a veg and a non-veg plan. You can set which plan applies on which weekday, and recipes are picked to match it.</p>${up}${manualBtn}</section>`;
   return `<section class="panel">
     <div class="row"><h2>Trainer's plans</h2><span class="spacer"></span><span class="small muted">Default: <b>${esc(planName(p,p.defaultPlanId||"calc"))}</b></span></div>
     <div class="scroll"><table><thead><tr><th>Plan</th><th>Type</th><th class="r">Calories</th><th class="r">Protein</th><th class="r">Carbs</th><th class="r">Fat</th><th>Source</th><th></th></tr></thead><tbody>
@@ -2755,17 +2756,19 @@ function trainerPanel(p){
       <div class="week">${WEEK.map(([k,l])=>`<label class="field"><span>${l}</span><select id="sch_${k}" data-sch="${k}">${planOptions(p,p.planSchedule?.[k]||"",true).replace('<option value="">Follow schedule</option>','<option value="">Default</option>')}</select></label>`).join("")}</div>
       <p class="small muted" style="margin:6px 0 0">Pick which plan applies on each weekday, for example the veg plan on Tuesdays. You can still switch the plan for a single day on the Today tab.</p></div>
     ${up}
+    ${manualBtn}
   </section>`;
 }
+function blankPlan(){const meals={};MEALS.forEach(([k])=>meals[k]={kcal:0,p:0,c:0,f:0,items:[],labels:[]});return {name:"Trainer's plan",type:"mixed",meals,notes:[],source:"Typed in",manual:true,uploaded:today()}}
 function planReview(pp,idx,total){
   const row=(k,l,m)=>`<tr><td><b>${l}</b>${m.labels.length?`<div class="small muted">${esc(m.labels.join(", "))}</div>`:""}</td>
     <td><textarea id="tp_i_${k}" aria-label="${l} foods">${esc(m.items.join("\n"))}</textarea></td>
     <td><input id="tp_k_${k}" type="number" min="0" value="${m.kcal?r0(m.kcal):""}" aria-label="${l} calories"></td><td><input id="tp_p_${k}" type="number" min="0" value="${m.p?r0(m.p):""}" aria-label="${l} protein"></td><td><input id="tp_c_${k}" type="number" min="0" value="${m.c?r0(m.c):""}" aria-label="${l} carbs"></td><td><input id="tp_f_${k}" type="number" min="0" value="${m.f?r0(m.f):""}" aria-label="${l} fat"></td></tr>`;
   const editing=!!pp.id;
   return `<form class="panel review" id="tpForm" novalidate>
-    <div class="row"><h2>${editing?"Edit plan":"Check plan"+(total>1?` ${idx+1} of ${total}`:"")}</h2><span class="spacer"></span><span class="pill">${esc(pp.source||"")}</span></div>
+    <div class="row"><h2>${editing?"Edit plan":pp.manual?"Add trainer's plan":"Check plan"+(total>1?` ${idx+1} of ${total}`:"")}</h2><span class="spacer"></span><span class="pill">${esc(pp.source||"")}</span></div>
     ${!editing&&UI.pendingFailed?.length&&idx===0?`<div class="note">Not read: ${esc(UI.pendingFailed.join(" · "))}</div>`:""}
-    <p class="small muted" style="margin:0">${editing?"Change anything, then save.":"This is what was read from the file. Correct anything that's off, then save."} Foods go one per line.${pp.estimated?" <b>Some calories and macros were estimated</b> because the plan didn't list them.":""}</p>
+    <p class="small muted" style="margin:0">${editing?"Change anything, then save.":pp.manual?"Copy the plan from your trainer's chart. Only the daily calories are required; per-meal calories and protein make the diet chart and recipe picks more accurate.":"This is what was read from the file. Correct anything that's off, then save."} Foods go one per line.${pp.estimated?" <b>Some calories and macros were estimated</b> because the plan didn't list them.":""}</p>
     <div class="grid g2">
       <label class="field"><span>Plan name</span><input id="tp_name" required maxlength="60" value="${esc(pp.name)}"></label>
       <label class="field"><span>Type</span><select id="tp_type">${Object.entries(PLAN_TYPES).map(([k,l])=>`<option value="${k}" ${pp.type===k?"selected":""}>${l}</option>`).join("")}</select></label>
@@ -2887,7 +2890,7 @@ document.addEventListener("click",async ev=>{
   else if(a==="logReportWeight"&&UI.reportWeight){const rw=UI.reportWeight;S.weights[p.id]=(S.weights[p.id]||[]).filter(w=>w.date!==rw.date).concat([{date:rw.date,kg:rw.kg}]);UI.reportWeight=null;saveState();scheduleSync();el.closest("div").innerHTML=`<span style="color:var(--good)">Logged ${rw.kg} kg for ${fmtShort(rw.date)}.</span>`;toast("Weight logged from report")}
   else if(a==="discardPlan"){skipPending()}
   else if(a==="savePlan"){savePlanSafe()}
-  else if(a==="driveRetry"){if(PP.tokenExpired()){try{await PP.signIn()}catch(e){toast(e.message||"Sign-in didn't finish.");return}}driveSaveNow()}
+  else if(a==="driveRetry"){if(PP.tokenExpired()){try{await PP.signIn({reauth:true})}catch(e){toast(e.message||"Sign-in didn't finish.");return}}driveSaveNow()}
   else if(a==="gsignin"){try{await PP.signIn()}catch(e){toast(e.message||"Sign-in didn't finish.");return}UI.locked=null;document.body.classList.remove("locked");bootApp()}
   else if(a==="gsignout"){PP.signOut()}
   else if(a==="copyLine"){const t=$("#codeLine");try{await navigator.clipboard.writeText(t.value);toast("Line copied")}catch(e){t.select();toast("Line selected. Copy it with your keyboard.")}}
@@ -2934,6 +2937,7 @@ document.addEventListener("click",async ev=>{
   else if(a==="usePlanDay"){S.planByDate=S.planByDate||{};const m=S.planByDate[p.id]=S.planByDate[p.id]||{};m[UI.date]=el.dataset.id;saveState();render();toast(planName(p,el.dataset.id)+" will be used on "+fmtShort(UI.date))}
   else if(a==="viewPlan"){UI.planView=el.dataset.id;render();$("#planView")?.scrollIntoView({block:"center"})}
   else if(a==="defPlan"){p.defaultPlanId=el.dataset.id==="calc"?null:el.dataset.id;saveState();scheduleSync();render();toast("Default plan changed")}
+  else if(a==="manualPlan"){UI.pendingPlans=[blankPlan()];UI.pendingIdx=0;UI.pendingFailed=null;render();window.scrollTo(0,0);setTimeout(()=>$("#tp_name")?.select(),50)}
   else if(a==="editPlan"){const x=plansOf(p).find(y=>y.id===el.dataset.id);UI.editPlan=JSON.parse(JSON.stringify(x));render();window.scrollTo(0,0)}
   else if(a==="askDelPlan"){const x=plansOf(p).find(y=>y.id===el.dataset.id);showOverlay(`<div class="sheet"><h2>Delete "${esc(x.name)}"?</h2><p>Days that used this plan will switch to the default plan. Meals you already logged are kept.</p><div class="row"><button class="primary" data-act="doDelPlan" data-id="${x.id}" style="background:var(--bad);border-color:var(--bad)">Delete plan</button><button data-act="close">Keep it</button></div></div>`)}
   else if(a==="doDelPlan"){const id=el.dataset.id;closeOverlay();p.trainerPlans=plansOf(p).filter(x=>x.id!==id);if(p.defaultPlanId===id)p.defaultPlanId=null;if(p.planSchedule)for(const k in p.planSchedule)if(p.planSchedule[k]===id)delete p.planSchedule[k];const ov=S.planByDate?.[p.id];if(ov)for(const d in ov)if(ov[d]===id)delete ov[d];if(UI.planView===id)UI.planView=null;saveState();scheduleSync();render();toast("Plan deleted")}
